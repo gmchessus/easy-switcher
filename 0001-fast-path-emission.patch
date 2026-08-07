@@ -1,0 +1,50 @@
+diff --git a/src/VirtualKeyboard.h b/src/VirtualKeyboard.h
+index 1111111..2222222 100644
+--- a/src/VirtualKeyboard.h
++++ b/src/VirtualKeyboard.h
+@@ -24,6 +24,8 @@
+ 
+     void emit_key(int code, int value);
+ 
++    void emit_key_fast(int code, int value);
++
+ private:
+     struct libevdev *dev_;
+     struct libevdev_uinput *uidev_;
+--- a/src/VirtualKeyboard.cpp	2026-08-07 15:26:34.744148089 +0300
++++ b/src/VirtualKeyboard.cpp	2026-08-07 15:26:22.801908614 +0300
+@@ -70,4 +70,13 @@
+     libevdev_uinput_write_event(uidev_, EV_SYN, SYN_REPORT, 0);
+ 
+     usleep(delay * 1000);
++}
++
++void VirtualKeyboard::emit_key_fast(int code, int value) {
++    if (!uidev_) return;
++
++    libevdev_uinput_write_event(uidev_, EV_KEY, code, value);
++    libevdev_uinput_write_event(uidev_, EV_SYN, SYN_REPORT, 0);
++
++    usleep(2 * 1000);
+ }
+\ No newline at end of file
+--- a/src/main.cpp	2026-08-07 15:26:34.744148089 +0300
++++ b/src/main.cpp	2026-08-07 15:26:22.801972144 +0300
+@@ -47,8 +47,15 @@
+             if (action_needed != None) {
+                 if (debug_mode) std::cout << "Convert pattern detected, processing..." << std::endl;
+ 
+-                for (const auto &ev: conv.convert(action_needed)) {
+-                    vk.emit_key(ev.code, ev.value);
++                const auto events = conv.convert(action_needed);
++                const int switch_events = (conv.ls_keys[1] != 0) ? 4 : 3;
++                for (size_t i = 0; i < events.size(); ++i) {
++                    const auto &ev = events[i];
++                    if (i < static_cast<size_t>(switch_events)) {
++                        vk.emit_key(ev.code, ev.value);
++                    } else {
++                        vk.emit_key_fast(ev.code, ev.value);
++                    }
+                     if (debug_mode) {
+                         std::cout << "Output: " << reader.get_key_name(ev.code) << " "
+                                 << reader.get_key_state(ev.value) << std::endl;
