@@ -1,127 +1,53 @@
-# easy-switcher — объединённый мануал (README + SKILL)
+# easy-switcher
 
-> Сконсолидировано из `README.md` и `SKILL.md` (единый источник правды).
+Fork of [freemind001/preview](https://github.com/freemind001/preview) — keyboard layout switcher daemon for Linux (Wayland/X11) with a fast-path emission patch for faster conversion.
 
-sudo apt install cmake libevdev-dev  
-git clone https://github.com/freemind001/preview.git  
-cd preview  
-mkdir build  
-cd build  
-cmake ..  
-make  
-sudo make install  
-sudo easy-switcher --configure  
-sudo systemctl enable easy-switcher  
-sudo systemctl start easy-switcher  
+## What it does
 
----
+Converts text typed in the wrong keyboard layout (e.g. `ghbdtn` → `привет`) by emulating backspace and re-typing via uinput. Press **Pause** to convert a word, **Shift+Pause** for a phrase.
 
-# (содержимое бывшего SKILL.md)
+## Fast-path patch
 
----
-name: easy-switcher
-description: Демон переключения раскладок клавиатуры для Linux (Wayland/X11). C++/cmake/libevdev. Конвертирует текст из неверной раскладки через виртуальную клавиатуру (uinput). Горячая клавиша Pause (слово) / Shift+Pause (фраза). Локальный патч fast-path emission для ускорения конвертации.
----
+The original code sleeps after every key event. This fork splits emission into two paths:
 
-# Easy Switcher — демон переключения раскладок клавиатуры
+- Layout switch events — original `emit_key` with configurable `delay`
+- Backspace/retype events — new `emit_key_fast` with fixed 2ms pause
 
-Демон для Linux, переключающий раскладку набранного текста через виртуальную клавиатуру (uinput/libevdev). Работает на Wayland (KDE Plasma/KWin) и X11.
+Result for a 5-letter word with `delay=50`: **1200ms → 240ms**.
 
-## Как работает
-
-1. Пользователь набирает текст в неверной раскладке (например, «ghbdtn» вместо «привет»).
-2. Нажимает **Pause** (конвертация слова) или **Shift+Pause** (конвертация фразы).
-3. Демон генерирует последовательность событий: смена раскладки → backspace каждого символа → повторный набор в правильной раскладке.
-
-## Сборка и установка
+## Build & install
 
 ```bash
 sudo apt install cmake libevdev-dev
-git clone https://github.com/freemind001/preview.git
-cd preview
+git clone https://github.com/gmchessus/easy-switcher.git
+cd easy-switcher
 mkdir build && cd build
 cmake ..
 make
 sudo make install
 sudo easy-switcher --configure
-sudo systemctl enable easy-switcher
-sudo systemctl start easy-switcher
+sudo systemctl enable --now easy-switcher
 ```
 
-## Локальные изменения (патч fast-path emission)
+## Configuration
 
-### Проблема
+File: `/etc/easy-switcher/config.conf` (example in `resources/default.conf.example`).
 
-В оригинальном коде `VirtualKeyboard::emit_key` спит `delay` после **каждого** события. При конвертации слова из N букв генерируется `4 + 4N` событий (4 смена раскладки + 2N backspace + 2N набор). Итоговая пауза: `(4 + 4N) * delay`.
+| Parameter | Description |
+|-----------|-------------|
+| `delay` | ms after layout switch (30-50 for KWin/Wayland) |
+| `hotkey` | key to convert a word |
+| `hotkey_phrase` | key to convert a phrase |
+| `layout1`, `layout2` | layouts for conversion (default: en/ru) |
 
-При `delay=50` и слове из 5 букв: `24 * 50 = 1200 мс`.
-
-### Решение
-
-Разделение эмиссии на два пути:
-- **Смена раскладки** (первые 3-4 события) — через `emit_key` с настраиваемым `delay` (критично для KWin).
-- **Backspace и повторный набор** — через `emit_key_fast` с фиксированной паузой 2 мс.
-
-Результат при `delay=50`, слово из 5 букв:
-- до: `24 * 50 = 1200 мс`
-- после: `4 * 50 + 20 * 2 = 240 мс`
-
-### Применение патча
+## Diagnostics
 
 ```bash
-cd <upstream repo>
-git apply 0001-fast-path-emission.patch
-```
-
-Патч находится в `easy-switcher/0001-fast-path-emission.patch`.
-
-## Структура исходников
-
-| Файл | Назначение |
-|------|------------|
-| `src/main.cpp` | Точка входа, event loop, input handler |
-| `src/VirtualKeyboard.cpp/h` | Эмуляция клавиатуры через uinput |
-| `src/Converter.cpp/h` | Конвертация текста между раскладками |
-| `src/Config.cpp/h` | Чтение конфигурации |
-| `src/DeviceManager.cpp/h` | Управление input-устройствами |
-| `src/Event.cpp/h` | Структуры событий |
-| `src/EventLoop.cpp/h` | Главный цикл (epoll/select) |
-| `src/InputReader.cpp/h` | Чтение нажатий клавиш |
-
-## Конфигурация
-
-Файл: `/etc/easy-switcher/config.conf` (пример в `resources/default.conf.example`).
-
-Ключевые параметры:
-- `delay` — задержка (мс) после смены раскладки (для KWin/Wayland)
-- `hotkey` — горячая клавиша конвертации слова
-- `hotkey_phrase` — горячая клавиша конвертации фразы
-- `layout1`, `layout2` — раскладки для конвертации (по умолчанию en/ru)
-
-## Конвертации раскладки
-
-По умолчанию: английская ↔ русская. Поддерживаются любые пары раскладок, определённые в `Converter`.
-
-Порядок событий конвертации:
-1. Эмуляция комбинации смены раскладки (Alt+Shift или одна клавиша)
-2. Backspace каждого символа с конца к началу
-3. Повторный набор символов в новой раскладке
-
-## Диагностика
-
-```bash
-# Статус демона
 systemctl status easy-switcher
-
-# Логи
 journalctl -u easy-switcher -f
-
-# Проверка uinput
 ls -la /dev/uinput
 ```
 
-## Известные ограничения
+## License
 
-- На Wayland (KDE) `delay` должен быть достаточным для KWin (обычно 30-50 мс).
-- На X11 можно использовать минимальный `delay`.
-- Для работы требуется доступ к `/dev/uinput` (обычно root или группа `input`).
+See upstream [freemind001/preview](https://github.com/freemind001/preview).
